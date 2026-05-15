@@ -9,3 +9,16 @@ root.render(
     <App />
   </React.StrictMode>
 );
+
+// Register the service worker in production builds only. CRA's dev server
+// hot-reload doesn't play well with a service worker caching the app shell.
+if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/sw.js')
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('Service worker registration failed:', err);
+      });
+  });
+}

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Package } from 'lucide-react';
+import { Package, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../stores/authStore';
-import { supabase } from '../services/supabaseClient';
+import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import { validEmail, friendlyError } from '../utils/validators';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -69,6 +69,27 @@ export default function LoginPage() {
           </h1>
           <p className="mt-1 text-sm text-gray-500">Sign in to continue</p>
         </div>
+
+        {!isSupabaseConfigured && (
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-semibold">Supabase not configured</p>
+              <p className="mt-1">
+                Create a <code className="rounded bg-amber-100 px-1">.env</code>{' '}
+                file in the project root with{' '}
+                <code className="rounded bg-amber-100 px-1">
+                  REACT_APP_SUPABASE_URL
+                </code>{' '}
+                and{' '}
+                <code className="rounded bg-amber-100 px-1">
+                  REACT_APP_SUPABASE_ANON_KEY
+                </code>
+                , then restart the dev server. See <code>README.md</code>.
+              </p>
+            </div>
+          </div>
+        )}
 
         {!forgotOpen ? (
           <form onSubmit={onSubmit} className="space-y-4">
