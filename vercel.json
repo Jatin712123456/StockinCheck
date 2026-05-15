@@ -1,0 +1,13 @@
+{
+  "rewrites": [
+    { "source": "/((?!sw\\.js|manifest\\.json|.*\\.(png|ico|svg|json|js|css|map)).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    }
+  ]
+}
