@@ -1,12 +1,17 @@
 import { supabase } from './supabaseClient';
 import { updateStock } from './materialsService';
 
-export async function listTransactions({ limit = 50, offset = 0 } = {}) {
-  const { data, error } = await supabase
+export async function listTransactions({
+  limit = 50,
+  offset = 0,
+  sinceIso = null,
+} = {}) {
+  let q = supabase
     .from('transactions')
     .select('*')
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+    .order('created_at', { ascending: false });
+  if (sinceIso) q = q.gte('created_at', sinceIso);
+  const { data, error } = await q.range(offset, offset + limit - 1);
   if (error) throw error;
   return data || [];
 }

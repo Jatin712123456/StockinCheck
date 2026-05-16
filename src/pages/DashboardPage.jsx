@@ -19,6 +19,7 @@ import {
   formatTime,
   startOfTodayIso,
 } from '../utils/formatters';
+import { debounce } from '../utils/debounce';
 import { friendlyError } from '../utils/validators';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
@@ -80,20 +81,27 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadAll();
+    // Coalesce bursts of realtime events into one refetch so rapid stock
+    // movements from multiple users don't thrash the network.
+    const debouncedFetchMaterials = debounce(() => fetchMaterials(), 500);
+    const debouncedLoadAll = debounce(loadAll, 500);
+
     const channel = supabase
       .channel('materials-dashboard')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'materials' },
-        () => fetchMaterials()
+        debouncedFetchMaterials
       )
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'transactions' },
-        () => loadAll()
+        debouncedLoadAll
       )
       .subscribe();
     return () => {
+      debouncedFetchMaterials.cancel();
+      debouncedLoadAll.cancel();
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

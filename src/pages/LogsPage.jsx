@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listTransactions } from '../services/transactionsService';
 import {
@@ -16,19 +16,41 @@ import ErrorState from '../components/ui/ErrorState';
 
 const PAGE_SIZE = 50;
 
+const RANGES = [
+  { key: 'today', label: 'Today' },
+  { key: 'week', label: 'This week' },
+  { key: 'all', label: 'All' },
+];
+
+function rangeStartIso(key) {
+  if (key === 'all') return null;
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  if (key === 'week') {
+    // Last 7 days inclusive of today.
+    d.setDate(d.getDate() - 6);
+  }
+  return d.toISOString();
+}
+
 export default function LogsPage() {
   const navigate = useNavigate();
+  const [range, setRange] = useState('week');
   const [txs, setTxs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
   const [hasMore, setHasMore] = useState(true);
 
-  async function loadInitial() {
+  const loadInitial = useCallback(async (r) => {
     setLoading(true);
     setError(null);
     try {
-      const rows = await listTransactions({ limit: PAGE_SIZE, offset: 0 });
+      const rows = await listTransactions({
+        limit: PAGE_SIZE,
+        offset: 0,
+        sinceIso: rangeStartIso(r),
+      });
       setTxs(rows);
       setHasMore(rows.length === PAGE_SIZE);
     } catch (e) {
@@ -36,7 +58,11 @@ export default function LogsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    loadInitial(range);
+  }, [range, loadInitial]);
 
   async function loadMore() {
     setLoadingMore(true);
@@ -44,20 +70,16 @@ export default function LogsPage() {
       const rows = await listTransactions({
         limit: PAGE_SIZE,
         offset: txs.length,
+        sinceIso: rangeStartIso(range),
       });
       setTxs((prev) => [...prev, ...rows]);
       setHasMore(rows.length === PAGE_SIZE);
     } catch (e) {
-      // surface with toast-less inline fallback
       setError(friendlyError(e));
     } finally {
       setLoadingMore(false);
     }
   }
-
-  useEffect(() => {
-    loadInitial();
-  }, []);
 
   const grouped = useMemo(() => {
     const map = new Map();
@@ -69,21 +91,44 @@ export default function LogsPage() {
     return Array.from(map.entries());
   }, [txs]);
 
-  if (loading) return <Spinner />;
-  if (error && txs.length === 0)
-    return <ErrorState message={error} onRetry={loadInitial} />;
-
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Logs</h1>
-        <p className="text-sm text-gray-500">Every stock movement, newest first.</p>
+        <p className="text-sm text-gray-500">
+          Every stock movement, newest first.
+        </p>
       </div>
 
-      {txs.length === 0 ? (
+      <div className="flex flex-wrap gap-2">
+        {RANGES.map((r) => (
+          <button
+            key={r.key}
+            type="button"
+            onClick={() => setRange(r.key)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+              range === r.key
+                ? 'border-blue-600 bg-blue-600 text-white'
+                : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <Spinner />
+      ) : error && txs.length === 0 ? (
+        <ErrorState message={error} onRetry={() => loadInitial(range)} />
+      ) : txs.length === 0 ? (
         <EmptyState
-          title="No activity yet"
-          description="Stock movements will appear here once they’re recorded."
+          title="No activity"
+          description={
+            range === 'all'
+              ? 'Stock movements will appear here once they’re recorded.'
+              : 'Nothing in this range. Try widening the filter.'
+          }
         />
       ) : (
         <div className="space-y-5">
@@ -98,6 +143,10 @@ export default function LogsPage() {
                     <li
                       key={t.id}
                       className="flex items-center justify-between gap-3 px-5 py-3 text-sm"
+                      style={{
+                        contentVisibility: 'auto',
+                        containIntrinsicSize: '0 56px',
+                      }}
                     >
                       <div className="flex min-w-0 items-center gap-3">
                         <Badge tone={t.type === 'IN' ? 'green' : 'red'}>
@@ -105,7 +154,9 @@ export default function LogsPage() {
                         </Badge>
                         <div className="min-w-0">
                           <button
-                            onClick={() => navigate(`/materials/${t.material_id}`)}
+                            onClick={() =>
+                              navigate(`/materials/${t.material_id}`)
+                            }
                             className="block truncate text-left font-medium text-gray-900 hover:underline"
                           >
                             {t.material_name}

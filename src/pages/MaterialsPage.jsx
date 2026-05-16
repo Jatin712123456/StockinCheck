@@ -5,6 +5,7 @@ import { useMaterialsStore } from '../stores/materialsStore';
 import { useAuthStore } from '../stores/authStore';
 import { supabase } from '../services/supabaseClient';
 import { formatQuantity, formatDateTime } from '../utils/formatters';
+import { debounce } from '../utils/debounce';
 import { friendlyError } from '../utils/validators';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
@@ -25,15 +26,17 @@ export default function MaterialsPage() {
 
   useEffect(() => {
     fetchMaterials().catch(() => {});
+    const debouncedRefetch = debounce(() => fetchMaterials(), 500);
     const channel = supabase
       .channel('materials-list')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'materials' },
-        () => fetchMaterials()
+        debouncedRefetch
       )
       .subscribe();
     return () => {
+      debouncedRefetch.cancel();
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
