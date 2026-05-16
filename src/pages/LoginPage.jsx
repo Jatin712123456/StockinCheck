@@ -58,7 +58,13 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+    <div
+      className="flex min-h-screen items-center justify-center bg-gray-50 px-4"
+      style={{
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
+    >
       <div className="w-full max-w-sm rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
         <div className="mb-6 flex flex-col items-center">
           <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white">
