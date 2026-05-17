@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listTransactions } from '../services/transactionsService';
+import { useTransactionsStore } from '../stores/transactionsStore';
 import {
   formatRelativeDay,
   formatTime,
   formatQuantity,
 } from '../utils/formatters';
+import { useDeferredFlag } from '../utils/useDeferredFlag';
 import { friendlyError } from '../utils/validators';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
@@ -14,82 +15,69 @@ import Spinner from '../components/ui/Spinner';
 import EmptyState from '../components/ui/EmptyState';
 import ErrorState from '../components/ui/ErrorState';
 
-const PAGE_SIZE = 50;
-
 const RANGES = [
   { key: 'today', label: 'Today' },
   { key: 'week', label: 'This week' },
   { key: 'all', label: 'All' },
 ];
 
-function rangeStartIso(key) {
-  if (key === 'all') return null;
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  if (key === 'week') {
-    // Last 7 days inclusive of today.
-    d.setDate(d.getDate() - 6);
-  }
-  return d.toISOString();
-}
-
 export default function LogsPage() {
   const navigate = useNavigate();
-  const [range, setRange] = useState('week');
-  const [txs, setTxs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState(null);
-  const [hasMore, setHasMore] = useState(true);
+  const {
+    logsRange,
+    logsItems,
+    logsHasMore,
+    logsLoaded,
+    logsRefreshing,
+    logsLoadingMore,
+    refreshLogs,
+    loadMoreLogs,
+  } = useTransactionsStore();
 
-  const loadInitial = useCallback(async (r) => {
-    setLoading(true);
+  const [error, setError] = useState(null);
+
+  // Cold start = nothing cached for this range yet.
+  const coldStart = !logsLoaded;
+  const showSpinner = useDeferredFlag(coldStart && logsRefreshing);
+
+  async function doRefresh(r) {
     setError(null);
     try {
-      const rows = await listTransactions({
-        limit: PAGE_SIZE,
-        offset: 0,
-        sinceIso: rangeStartIso(r),
-      });
-      setTxs(rows);
-      setHasMore(rows.length === PAGE_SIZE);
+      await refreshLogs(r);
     } catch (e) {
       setError(friendlyError(e));
-    } finally {
-      setLoading(false);
     }
-  }, []);
+  }
 
   useEffect(() => {
-    loadInitial(range);
-  }, [range, loadInitial]);
+    // On mount, only fetch if we have no cached data for the current range.
+    if (!logsLoaded) doRefresh(logsRange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  async function loadMore() {
-    setLoadingMore(true);
+  function onSelectRange(r) {
+    if (r === logsRange) return;
+    // Show old data while we fetch the new range (no spinner flash).
+    doRefresh(r);
+  }
+
+  async function onLoadMore() {
     try {
-      const rows = await listTransactions({
-        limit: PAGE_SIZE,
-        offset: txs.length,
-        sinceIso: rangeStartIso(range),
-      });
-      setTxs((prev) => [...prev, ...rows]);
-      setHasMore(rows.length === PAGE_SIZE);
+      await loadMoreLogs();
     } catch (e) {
       setError(friendlyError(e));
-    } finally {
-      setLoadingMore(false);
     }
   }
 
   const grouped = useMemo(() => {
     const map = new Map();
-    for (const t of txs) {
+    for (const t of logsItems) {
       const key = formatRelativeDay(t.created_at);
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(t);
     }
     return Array.from(map.entries());
-  }, [txs]);
+  }, [logsItems]);
 
   return (
     <div className="space-y-5">
@@ -105,9 +93,9 @@ export default function LogsPage() {
           <button
             key={r.key}
             type="button"
-            onClick={() => setRange(r.key)}
+            onClick={() => onSelectRange(r.key)}
             className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-              range === r.key
+              logsRange === r.key
                 ? 'border-blue-600 bg-blue-600 text-white'
                 : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
             }`}
@@ -117,15 +105,15 @@ export default function LogsPage() {
         ))}
       </div>
 
-      {loading ? (
+      {showSpinner ? (
         <Spinner />
-      ) : error && txs.length === 0 ? (
-        <ErrorState message={error} onRetry={() => loadInitial(range)} />
-      ) : txs.length === 0 ? (
+      ) : error && logsItems.length === 0 ? (
+        <ErrorState message={error} onRetry={() => doRefresh(logsRange)} />
+      ) : logsItems.length === 0 ? (
         <EmptyState
           title="No activity"
           description={
-            range === 'all'
+            logsRange === 'all'
               ? 'Stock movements will appear here once they’re recorded.'
               : 'Nothing in this range. Try widening the filter.'
           }
@@ -177,12 +165,12 @@ export default function LogsPage() {
             </div>
           ))}
 
-          {hasMore && (
+          {logsHasMore && (
             <div className="flex justify-center pt-2">
               <Button
                 variant="secondary"
-                onClick={loadMore}
-                loading={loadingMore}
+                onClick={onLoadMore}
+                loading={logsLoadingMore}
               >
                 Load more
               </Button>

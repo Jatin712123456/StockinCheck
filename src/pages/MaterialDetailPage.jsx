@@ -13,12 +13,11 @@ import {
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../stores/authStore';
 import { useMaterialsStore } from '../stores/materialsStore';
+import { useTransactionsStore } from '../stores/transactionsStore';
 import * as materialsService from '../services/materialsService';
-import {
-  listTransactionsForMaterial,
-  recordStockMovement,
-} from '../services/transactionsService';
+import { recordStockMovement } from '../services/transactionsService';
 import { formatQuantity, formatDateTime } from '../utils/formatters';
+import { useDeferredFlag } from '../utils/useDeferredFlag';
 import {
   required,
   nonNegativeNumber,
@@ -37,43 +36,59 @@ export default function MaterialDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user, profile } = useAuthStore();
-  const { updateMaterial, deleteMaterial } = useMaterialsStore();
+  const { materials, updateMaterial, deleteMaterial } = useMaterialsStore();
+  const { byMaterial, refreshMaterialTransactions } = useTransactionsStore();
   const isAdmin = profile?.role === 'admin';
 
-  const [material, setMaterial] = useState(null);
-  const [txs, setTxs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Seed from the cached materials list if we have it, so navigation from
+  // the Materials page is instant — no spinner.
+  const cachedMaterial = materials.find((m) => m.id === id) || null;
+  const cachedTxs = byMaterial[id]?.items || [];
+
+  const [material, setMaterial] = useState(cachedMaterial);
+  const [txs, setTxs] = useState(cachedTxs);
+  const [fetching, setFetching] = useState(!cachedMaterial);
   const [error, setError] = useState(null);
+
+  const coldStart = !cachedMaterial && !material;
+  const showSpinner = useDeferredFlag(coldStart && fetching);
 
   const [stockModal, setStockModal] = useState(null); // 'IN' | 'OUT' | null
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   async function load() {
-    setLoading(true);
+    setFetching(true);
     setError(null);
     try {
       const [m, t] = await Promise.all([
         materialsService.getMaterial(id),
-        listTransactionsForMaterial(id, 20),
+        refreshMaterialTransactions(id, 20),
       ]);
       setMaterial(m);
       setTxs(t);
     } catch (e) {
       setError(friendlyError(e));
     } finally {
-      setLoading(false);
+      setFetching(false);
     }
   }
 
   useEffect(() => {
+    // Always refresh in background; the UI shows cached data immediately.
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  if (loading) return <Spinner />;
-  if (error || !material)
+  // Keep displayed transactions in sync with the store as it updates.
+  useEffect(() => {
+    if (byMaterial[id]?.items) setTxs(byMaterial[id].items);
+  }, [byMaterial, id]);
+
+  if (showSpinner) return <Spinner />;
+  if ((error || !material) && coldStart)
     return <ErrorState message={error || 'Not found'} onRetry={load} />;
+  if (!material) return <Spinner />;
 
   const low = Number(material.quantity) < Number(material.minimum_stock);
 

@@ -9,17 +9,11 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useMaterialsStore } from '../stores/materialsStore';
+import { useTransactionsStore } from '../stores/transactionsStore';
 import { supabase } from '../services/supabaseClient';
-import {
-  listTransactions,
-  listTransactionsSince,
-} from '../services/transactionsService';
-import {
-  formatQuantity,
-  formatTime,
-  startOfTodayIso,
-} from '../utils/formatters';
+import { formatQuantity, formatTime } from '../utils/formatters';
 import { debounce } from '../utils/debounce';
+import { useDeferredFlag } from '../utils/useDeferredFlag';
 import { friendlyError } from '../utils/validators';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
@@ -55,53 +49,50 @@ function StatCard({ icon: Icon, label, value, tone = 'blue' }) {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { materials, fetchMaterials } = useMaterialsStore();
-  const [todayTx, setTodayTx] = useState([]);
-  const [recent, setRecent] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    recent,
+    today,
+    dashboardLoaded,
+    dashboardRefreshing,
+    refreshDashboard,
+  } = useTransactionsStore();
+
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
 
-  async function loadAll() {
-    setLoading(true);
+  // Stale-while-revalidate: render whatever's in the store immediately
+  // and refresh in background. Only show the spinner when the store is
+  // empty AND the refresh has been pending for >200ms.
+  const coldStart = !dashboardLoaded && materials.length === 0;
+  const showSpinner = useDeferredFlag(coldStart && dashboardRefreshing);
+
+  async function refresh() {
     setError(null);
     try {
-      await fetchMaterials();
-      const [todays, recentTx] = await Promise.all([
-        listTransactionsSince(startOfTodayIso()),
-        listTransactions({ limit: 10 }),
-      ]);
-      setTodayTx(todays);
-      setRecent(recentTx);
+      await Promise.all([fetchMaterials(), refreshDashboard()]);
     } catch (e) {
       setError(friendlyError(e));
-    } finally {
-      setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadAll();
-    // Coalesce bursts of realtime events into one refetch so rapid stock
-    // movements from multiple users don't thrash the network.
-    const debouncedFetchMaterials = debounce(() => fetchMaterials(), 500);
-    const debouncedLoadAll = debounce(loadAll, 500);
-
+    refresh();
+    const debouncedRefresh = debounce(refresh, 500);
     const channel = supabase
       .channel('materials-dashboard')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'materials' },
-        debouncedFetchMaterials
+        debouncedRefresh
       )
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'transactions' },
-        debouncedLoadAll
+        debouncedRefresh
       )
       .subscribe();
     return () => {
-      debouncedFetchMaterials.cancel();
-      debouncedLoadAll.cancel();
+      debouncedRefresh.cancel();
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -112,14 +103,14 @@ export default function DashboardPage() {
     const low = materials.filter(
       (m) => Number(m.quantity) < Number(m.minimum_stock)
     ).length;
-    const addedToday = todayTx
+    const addedToday = today
       .filter((t) => t.type === 'IN')
       .reduce((s, t) => s + Number(t.quantity), 0);
-    const removedToday = todayTx
+    const removedToday = today
       .filter((t) => t.type === 'OUT')
       .reduce((s, t) => s + Number(t.quantity), 0);
     return { total, low, addedToday, removedToday };
-  }, [materials, todayTx]);
+  }, [materials, today]);
 
   function onSearchSubmit(e) {
     e.preventDefault();
@@ -130,8 +121,8 @@ export default function DashboardPage() {
     }
   }
 
-  if (loading) return <Spinner />;
-  if (error) return <ErrorState message={error} onRetry={loadAll} />;
+  if (showSpinner) return <Spinner />;
+  if (error && coldStart) return <ErrorState message={error} onRetry={refresh} />;
 
   return (
     <div className="space-y-6">
